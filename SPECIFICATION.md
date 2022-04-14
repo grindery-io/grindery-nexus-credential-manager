@@ -36,9 +36,11 @@ Index | Type | Description
 
 **Returns:**
 
-`string` | id of the auth credential.
+`string` | the id of the auth credential.
 
 **Processing:**
+
+In the case of a request (e.g OAuth2), all response data should be stored, not just the access token and refresh token.
 
 Along with the display name passed in with the request, some additional metadata about credentials should be stored for use by the [cm_getAuthCredentialsDisplayInfo](#cm_getauthcredentialsdisplayinfo) method e.g a creation date/time.
 
@@ -92,3 +94,8 @@ Key | Type | Description
 ----|------|------------
 `data` | oneOf(`object`, `string`) | the response data.
 `headers` | `object` | the response headers.
+
+**Processing:**
+
+The connector id should be used to retrieve the [authentication config](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#authenticationschema), 
+whose `type` and other definitions then determines which headers and/or parameters to add to the request.
