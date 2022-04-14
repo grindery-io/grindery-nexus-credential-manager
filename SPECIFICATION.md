@@ -31,7 +31,7 @@ Index | Type | Description
 ------|------|------------
 1 | `string` | id of the connector.
 2 | `string` | DID of the user.
-3 | oneOf([RequestSchema](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#requestschema), object)  | the request to make to retrieve the user’s authentication credentials or a key, value map where the key is the name of the auth secret and the value is the value of the auth secret.
+3 | oneOf([RequestSchema](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#requestschema), object)  | the request to make to retrieve the user’s authentication credentials (e.g the `getAccessToken` call from the [OAuth2](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#authenticationoauth2configschema) and [OAuth1](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#authenticationoauth1configschema) config of the connector) or a key, value map where the key is the name of the auth secret and the value is the value of the auth secret e.g (the username and password for `basic` and `digest` authentication).
 4 | `string` | Display name for the credentials.
 
 **Returns:**
@@ -79,7 +79,8 @@ Makes an authenticated request and returns the response
 Index | Type | Description
 ------|------|------------
 1 | `string` | id of the connector.
-2 | `string` | id of the credentials.
+2 | `string` | id of the auth credentials.
+3 | [RequestSchema](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#requestschema)  | the request to make.
 
 **Returns:**
 
