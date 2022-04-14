@@ -40,7 +40,7 @@ Index | Type | Description
 
 **Processing:**
 
-Along with the display name passed in with the request, some additional metadata about credentials should be stored for use by the `cm_getAuthCredentialsDisplayInfo` method e.g a creation date/time.
+Along with the display name passed in with the request, some additional metadata about credentials should be stored for use by the [cm_getAuthCredentialsDisplayInfo](#cm_getauthcredentialsdisplayinfo) method e.g a creation date/time.
 
 **NOTE:** Stored auth credentials can be referenced with the `{{auth.<key>}}` syntax in the parameters of other methods
 
