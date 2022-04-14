@@ -11,8 +11,8 @@ Stores connector secrets i.e environment variables.
 
 Index | Type | Description
 ------|------|------------
-1. | `string` | id of the connector.
-2. | `object` | key, value map where the key is the name of the secret and the value is the value of the secret.
+1 | `string` | id of the connector.
+2 | `object` | key, value map where the key is the name of the secret and the value is the value of the secret.
 
 **Returns:**
 
@@ -29,10 +29,10 @@ Retrieves and stores user authentication credentials e.g username and password f
 
 Index | Type | Description
 ------|------|------------
-1. | `string` | id of the connector.
-2. | `string` | DID of the user.
-3. | oneOf([RequestSchema](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#requestschema), object)  | the request to make to retrieve the user’s authentication credentials or a key, value map where the key is the name of the auth secret and the value is the value of the auth secret.
-4. | `string` | Display name for the credentials.
+1 | `string` | id of the connector.
+2 | `string` | DID of the user.
+3 | oneOf([RequestSchema](https://github.com/grindery-io/grindery-nexus-schema/tree/master/connectors#requestschema), object)  | the request to make to retrieve the user’s authentication credentials or a key, value map where the key is the name of the auth secret and the value is the value of the auth secret.
+4 | `string` | Display name for the credentials.
 
 **Returns:**
 
@@ -53,8 +53,8 @@ Returns metadata about existing auth credentials.
 
 Index | Type | Description
 ------|------|------------
-1. | `string` | id of the connector.
-2. | `string` | DID of the user.
+1 | `string` | id of the connector.
+2 | `string` | DID of the user.
 
 **Returns:**
 
@@ -78,8 +78,8 @@ Makes an authenticated request and returns the response
 
 Index | Type | Description
 ------|------|------------
-1. | `string` | id of the connector.
-2. | `string` | id of the credentials.
+1 | `string` | id of the connector.
+2 | `string` | id of the credentials.
 
 **Returns:**
 
