@@ -1,5 +1,10 @@
 import { createJSONRPCErrorResponse, JSONRPCErrorCode, JSONRPCParams, JSONRPCServer } from "json-rpc-2.0";
-import { getAuthCredentialsDisplayInfo, makeRequest, putAuthCredentials, putConnectorSecrets } from "./credentialManager";
+import {
+  getAuthCredentialsDisplayInfo,
+  makeRequest,
+  putAuthCredentials,
+  putConnectorSecrets,
+} from "./credentialManager";
 
 export class InvalidParamsError extends Error {
   constructor(message?: string) {
@@ -12,6 +17,11 @@ const exceptionMiddleware = async (next, request, serverParams) => {
   } catch (error) {
     if (error instanceof InvalidParamsError) {
       return createJSONRPCErrorResponse(request.id, JSONRPCErrorCode.InvalidParams, error.message);
+    } else if (error.isAxiosError) {
+      return createJSONRPCErrorResponse(request.id, error.response?.status, error.message, {
+        headers: error.response?.headers,
+        data: error.response?.data,
+      });
     } else {
       throw error;
     }

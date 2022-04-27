@@ -15,6 +15,15 @@ export type MakeRequestResponse = {
   data: unknown;
   headers: { [key: string]: string };
 };
+export type Oauth2Config = {
+  authorizeUrl: string;
+  getAccessToken: RequestSchema;
+  refreshAccessToken?: RequestSchema;
+  codeParam?: string;
+  scope?: string;
+  autoRefresh?: string;
+};
+
 export type AuthenticationSchema = {
   test: RequestSchema;
   // fields: FieldsSchema[];
@@ -33,18 +42,11 @@ export type AuthenticationSchema = {
     }
   | {
       type: "oauth2";
-      oauth1Config: {
-        authorizeUrl: string;
-        getAccessToken: RequestSchema;
-        refreshAccessToken?: RequestSchema;
-        codeParam?: string;
-        scope?: string;
-        autoRefresh?: string;
-      };
+      oauth2Config: Oauth2Config;
     }
   | {
       type: "session";
-      oauth1Config: {
+      sessionConfig: {
         operation: RequestSchema;
       };
     }

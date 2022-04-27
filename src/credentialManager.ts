@@ -1,8 +1,14 @@
 import { InvalidParamsError } from "./jsonrpc";
-import { RequestSchema, AuthCredentialsDisplayInfo, MakeRequestResponse } from "./types";
+import { RequestSchema, AuthCredentialsDisplayInfo, MakeRequestResponse, Oauth2Config } from "./types";
 import { getCollection } from "./db";
-import axios from "axios";
 import { DEMO_CONNECTORS } from "./demoConnectors";
+import {
+  makeRequestBasicDigest,
+  makeRequestInternal,
+  replaceTokens,
+  updateHeaders,
+  verifyRequestSchema,
+} from "./request";
 
 function verifyDid(did: string) {
   if (typeof did !== "string" || !/^did:[^:]+:.+$/.test(did)) {
@@ -15,34 +21,6 @@ function verifyConnectorId(connectorId: string) {
   }
   if (!(connectorId in DEMO_CONNECTORS)) {
     throw new InvalidParamsError("Unknown connector ID");
-  }
-}
-function verifyRequestSchema(request: RequestSchema) {
-  if (typeof request !== "object") {
-    throw new InvalidParamsError("Invalid request schema");
-  }
-  if (request.method !== undefined && typeof request.method !== "string") {
-    throw new InvalidParamsError("Invalid request method");
-  }
-  if (!request.url || typeof request.url !== "string") {
-    throw new InvalidParamsError("Invalid request URL");
-  }
-  if (request.body !== undefined && typeof request.body !== "string" && typeof request.body !== "object") {
-    throw new InvalidParamsError("Invalid request body");
-  }
-  if (request.params !== undefined && typeof request.params !== "object") {
-    throw new InvalidParamsError("Invalid request params");
-  }
-  if (request.headers !== undefined && typeof request.headers !== "object") {
-    throw new InvalidParamsError("Invalid request headers");
-  }
-  if (request.auth !== undefined && typeof request.auth !== "object") {
-    throw new InvalidParamsError("Invalid request auth");
-  }
-
-  const method = request.method?.toString().toUpperCase() ?? "GET";
-  if (["GET", "HEAD"].includes(method) && request.body) {
-    throw new InvalidParamsError("Invalid body for GET/HEAD request");
   }
 }
 
@@ -75,6 +53,16 @@ export async function putAuthCredentials(
   if (typeof displayName !== "string" || !displayName) {
     throw new InvalidParamsError("Invalid display name");
   }
+  const connector = DEMO_CONNECTORS[connectorId];
+  if (!connector) {
+    throw new InvalidParamsError("Unknown connector ID");
+  }
+  const authType = connector.authentication?.type;
+  if (authType === "basic" || authType === "digest") {
+    if (typeof authCredentials !== "object" || !("username" in authCredentials) || !("password" in authCredentials)) {
+      throw new InvalidParamsError("Invalid auth credentials");
+    }
+  }
   const collection = await getCollection("authCredentials");
   const existingDoc = await collection.findOne({ connectorId, userDid });
   const result = await collection.replaceOne(
@@ -105,38 +93,33 @@ export async function getAuthCredentialsDisplayInfo(
     createdAt: new Date(doc.createdAt).toISOString(),
   }));
 }
-async function makeRequestInternal(request: RequestSchema): Promise<MakeRequestResponse> {
-  const resp = await axios({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    method: request.method || "GET",
-    url: request.url,
-    ...(request.body && { data: typeof request.body === "string" ? request.body : JSON.stringify(request.body) }),
-    headers: {
-      ...(request.body && typeof request.body !== "string" && { "Content-Type": "application/json" }),
-      ...(request.headers && { ...request.headers }),
-    },
-    ...(Array.isArray(request.auth) && {
-      auth: {
-        username: request.auth[0],
-        password: request.auth[1],
-      },
-    }),
-    params: request.params,
-    responseType: "text",
-  });
-  let data = resp.data;
-  if (resp.headers["content-type"]?.includes("application/json")) {
-    try {
-      data = JSON.parse(data);
-    } catch (e) {
-      // ignore
-    }
+
+async function refreshOauth2AccessToken({
+  connectorId,
+  userDid,
+  credentials,
+  authConfig,
+  displayName,
+}: {
+  connectorId: string;
+  userDid: string;
+  credentials: unknown;
+  authConfig: Oauth2Config;
+  displayName: string;
+}) {
+  if (!authConfig?.refreshAccessToken) {
+    throw new Error("We don't know how to refresh access tokens for this connector");
   }
-  return {
-    data,
-    headers: resp.headers,
-  };
+  const secretsConnection = await getCollection("connectorSecrets");
+  const secretsDoc = await secretsConnection.findOne({ connectorId });
+  const secrets = JSON.parse(secretsDoc?.secrets || "{}");
+  const refreshRequest = replaceTokens(authConfig.refreshAccessToken, { auth: credentials, secrets });
+  const refreshResponse = await makeRequestInternal(refreshRequest);
+  credentials = refreshResponse.data;
+  await putAuthCredentials(connectorId, userDid, credentials as object, displayName);
+  return credentials;
 }
+
 export async function makeRequest(
   connectorId: string,
   userDid: string,
@@ -145,10 +128,72 @@ export async function makeRequest(
   verifyConnectorId(connectorId);
   verifyDid(userDid);
   verifyRequestSchema(request);
+  const connector = DEMO_CONNECTORS[connectorId];
+  if (!connector) {
+    throw new InvalidParamsError("Unknown connector ID");
+  }
   const collection = await getCollection("authCredentials");
   const doc = await collection.findOne({ connectorId, userDid });
   if (!doc) {
     throw new InvalidParamsError("No credentials found");
+  }
+  let credentials = JSON.parse(doc.authCredentials);
+  const originalRequest = request;
+  request = replaceTokens(request, { auth: credentials });
+  const authType = connector.authentication?.type;
+  if (authType === "basic") {
+    request.auth = [credentials.username, credentials.password];
+  }
+  if (authType === "basic" || authType === "digest") {
+    return await makeRequestBasicDigest(request, credentials.username, credentials.password);
+  }
+  if (authType === "oauth2") {
+    let accessTokenRefreshed = false;
+    const authConfig = connector.authentication?.oauth2Config;
+    if (authConfig?.refreshAccessToken && authConfig?.autoRefresh && credentials.expires_in) {
+      const expiresAt = doc.updatedAt + credentials.expires_in * 1000;
+      if (expiresAt < Date.now() + 10000) {
+        credentials = await refreshOauth2AccessToken({
+          connectorId,
+          userDid,
+          credentials,
+          authConfig,
+          displayName: doc.displayName,
+        });
+        accessTokenRefreshed = true;
+      }
+    }
+    request = replaceTokens(originalRequest, { auth: credentials });
+    if (credentials.access_token) {
+      request.headers = updateHeaders(request.headers || {}, {
+        Authorization: `Bearer ${credentials.access_token}`,
+      });
+    }
+    try {
+      return await makeRequestInternal(request);
+    } catch (e) {
+      if (e.response?.status !== 401) {
+        throw e;
+      }
+      if (accessTokenRefreshed || !authConfig?.refreshAccessToken || !authConfig?.autoRefresh) {
+        throw e;
+      }
+      credentials = await refreshOauth2AccessToken({
+        connectorId,
+        userDid,
+        credentials,
+        authConfig,
+        displayName: doc.displayName,
+      });
+      accessTokenRefreshed = true;
+      request = replaceTokens(originalRequest, { auth: credentials });
+      if (credentials.access_token) {
+        request.headers = updateHeaders(request.headers || {}, {
+          Authorization: `Bearer ${credentials.access_token}`,
+        });
+      }
+      return await makeRequestInternal(request);
+    }
   }
   throw new Error("Not implemented");
 }
