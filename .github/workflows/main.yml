@@ -44,4 +44,4 @@ jobs:
           workload_identity_provider: 'projects/185967875270/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
           service_account: 'gh-gn-credential-manager@inboundlabs-test.iam.gserviceaccount.com'
 
-      - run: ./deploy.sh
+      - run: npm run deploy
