@@ -5,6 +5,7 @@ import {
   putAuthCredentials,
   putConnectorSecrets,
 } from "./credentialManager";
+import * as Sentry from "@sentry/node";
 
 export class InvalidParamsError extends Error {
   constructor(message?: string) {
@@ -23,6 +24,8 @@ const exceptionMiddleware = async (next, request, serverParams) => {
         data: error.response?.data,
       });
     } else {
+      Sentry.captureException(error);
+      await Sentry.flush(2000);
       throw error;
     }
   }
