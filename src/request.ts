@@ -1,8 +1,7 @@
 import { createHash } from "crypto";
-import { InvalidParamsError } from "./jsonrpc";
-import { RequestSchema, MakeRequestResponse } from "./types";
+import { RequestSchema, MakeRequestResponse } from "grindery-nexus-common-utils/dist/types";
 import axios from "axios";
-import _ from "lodash";
+import { InvalidParamsError } from "grindery-nexus-common-utils/dist/jsonrpc";
 
 export function verifyRequestSchema(request: RequestSchema) {
   if (typeof request !== "object") {
@@ -31,23 +30,6 @@ export function verifyRequestSchema(request: RequestSchema) {
   if (["GET", "HEAD"].includes(method) && request.body) {
     throw new InvalidParamsError("Invalid body for GET/HEAD request");
   }
-}
-export function replaceTokens<T>(obj: T, context: { [key: string]: unknown }): T {
-  if (typeof obj === "string") {
-    return obj.replace(/\{\{\s*([^}]+)\s*\}\}/g, (original, key) =>
-      ((_.get(context, key, original) as string) || "").toString()
-    ) as unknown as T;
-  }
-  if (typeof obj === "object") {
-    if (Array.isArray(obj)) {
-      return obj.map((item) => replaceTokens(item, context)) as unknown as T;
-    }
-    return Object.entries(obj).reduce((acc, [key, value]) => {
-      acc[key] = replaceTokens(value, context);
-      return acc;
-    }, {} as T);
-  }
-  return obj;
 }
 export async function makeRequestInternal(request: RequestSchema): Promise<MakeRequestResponse> {
   const resp = await axios({

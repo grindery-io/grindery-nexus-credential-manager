@@ -1,14 +1,32 @@
-import "dotenv/config";
-import bodyParser from "body-parser";
-import express from "express";
+import { createJsonRpcServer, forceObject, runJsonRpcServer } from "grindery-nexus-common-utils";
 
-const app = express();
-app.use(bodyParser.json());
+import {
+  getAuthCredentialsDisplayInfo,
+  makeRequest,
+  putAuthCredentials,
+  putConnectorSecrets,
+  getConnectorAuthorizeUrl,
+  completeConnectorAuthorization,
+} from "./credentialManager";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-app.post("/", require("./index").http);
+function createServer() {
+  const server = createJsonRpcServer();
+  const methods = {
+    putConnectorSecrets,
+    putAuthCredentials,
+    getAuthCredentialsDisplayInfo,
+    makeRequest,
+    getConnectorAuthorizeUrl,
+    completeConnectorAuthorization,
+  };
+  for (const [name, func] of Object.entries(methods) as [string, (params: unknown) => Promise<unknown>][]) {
+    server.addMethod("cm_" + name, forceObject(func));
+    server.addMethod(name, forceObject(func));
+  }
+  return server;
+}
 
-const port = parseInt(process.env.PORT || "", 10) || 3000;
-
-console.log(`Listening on port ${port}`);
-app.listen(port);
+export const server = createServer();
+if (require.main === module) {
+  runJsonRpcServer(server);
+}

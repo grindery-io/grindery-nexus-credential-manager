@@ -9,8 +9,9 @@ type DbSchema = {
     updatedAt: number; // milliseconds since epoch
   };
   authCredentials: {
+    key: string;
     connectorId: string;
-    userDid: string;
+    userId: string;
     authCredentials: string; // JSON string
     displayName: string;
     updatedAt: number; // milliseconds since epoch

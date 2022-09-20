@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "call": "node bin/local.js",
     "build": "./build.sh",
-    "deploy": "./deploy.sh",
-    "server": "[ -f server.js ] && node server || ts-node src/server"
+    "local": "ts-node src/local",
+    "server": "[ -f server.js ] && node server || ts-node src/server",
+    "server:dist": "cd dist && node server"
   },
   "author": "",
   "license": "ISC",
@@ -18,9 +18,12 @@
     "core-js": "^3.22",
     "dotenv": "^16.0.0",
     "express": "^4.17.3",
+    "grindery-nexus-common-utils": "^1.0.21",
+    "jose": "^4.9.3",
     "json-rpc-2.0": "^1.1.0",
     "lodash": "^4.17.21",
-    "mongodb": "^4.5.0"
+    "mongodb": "^4.5.0",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@babel/cli": "^7.17.6",
@@ -33,6 +36,8 @@
     "@tsconfig/node16": "^1.0.2",
     "@types/express": "^4.17.1",
     "@types/lodash": "^4.14.182",
+    "@types/node": "^18.7.18",
+    "@types/uuid": "^8.3.4",
     "@typescript-eslint/eslint-plugin": "^5.19.0",
     "@typescript-eslint/parser": "^5.19.0",
     "eslint": "^8.13",
