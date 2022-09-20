@@ -10,11 +10,11 @@ import { makeRequestBasicDigest, makeRequestInternal, updateHeaders, verifyReque
 import { replaceTokens, InvalidParamsError, getConnectorSchema } from "grindery-nexus-common-utils";
 import { AUD_CREDENTIAL_TOKEN, decryptJWT, encryptJWT, parseUserAccessToken } from "./jwt";
 
-async function verifyConnectorId(connectorId: string) {
+async function verifyConnectorId(connectorId: string, environment: string) {
   if (typeof connectorId !== "string" || !/^[a-zA-Z0-9-_]+$/.test(connectorId)) {
     throw new InvalidParamsError("Invalid connector ID");
   }
-  if (!(await getConnectorSchema(connectorId, "production"))) {
+  if (!(await getConnectorSchema(connectorId, environment))) {
     throw new InvalidParamsError(`Connector ${connectorId} doesn't exist`);
   }
 }
@@ -22,18 +22,20 @@ async function verifyConnectorId(connectorId: string) {
 export async function putConnectorSecrets({
   connectorId,
   secrets,
+  environment,
 }: {
   connectorId: string;
   secrets: { [key: string]: unknown };
+  environment: string;
 }) {
-  await verifyConnectorId(connectorId);
+  await verifyConnectorId(connectorId, environment);
   if (typeof secrets !== "object") {
     throw new InvalidParamsError("Invalid secrets");
   }
   const collection = await getCollection("connectorSecrets");
   await collection.replaceOne(
-    { connectorId },
-    { connectorId, secrets: JSON.stringify(secrets), updatedAt: Date.now() },
+    { connectorId, environment },
+    { connectorId, environment, secrets: JSON.stringify(secrets), updatedAt: Date.now() },
     { upsert: true }
   );
 }
@@ -45,13 +47,15 @@ export async function putAuthCredentials({
   accessToken,
   authCredentials,
   displayName,
+  environment,
 }: {
   connectorId: string;
   accessToken: string;
   authCredentials: RequestSchema | object;
   displayName: string;
+  environment: string;
 }) {
-  await verifyConnectorId(connectorId);
+  await verifyConnectorId(connectorId, environment);
   const parsedToken = await parseUserAccessToken(accessToken);
   const userId = parsedToken.sub || "";
   if (typeof authCredentials !== "object") {
@@ -63,7 +67,7 @@ export async function putAuthCredentials({
   if (typeof displayName !== "string" || !displayName) {
     throw new InvalidParamsError("Invalid display name");
   }
-  const connector = await getConnectorSchema(connectorId, "production");
+  const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
     throw new InvalidParamsError("Unknown connector ID");
   }
@@ -79,6 +83,7 @@ export async function putAuthCredentials({
     key,
     connectorId,
     userId,
+    environment,
     authCredentials: JSON.stringify(authCredentials),
     displayName,
     updatedAt: Date.now(),
@@ -89,15 +94,17 @@ export async function putAuthCredentials({
 export async function getAuthCredentialsDisplayInfo({
   connectorId,
   accessToken,
+  environment,
 }: {
   connectorId: string;
   accessToken: string;
+  environment: string;
 }): Promise<AuthCredentialsDisplayInfo[]> {
-  await verifyConnectorId(connectorId);
+  await verifyConnectorId(connectorId, environment);
   const parsedToken = await parseUserAccessToken(accessToken);
   const userId = parsedToken.sub || "";
   const collection = await getCollection("authCredentials");
-  const docs = await collection.find({ connectorId, userId }).toArray();
+  const docs = await collection.find({ connectorId, userId, environment }).toArray();
   const ret = docs.map(
     (doc) =>
       ({
@@ -118,23 +125,31 @@ async function refreshOauth2AccessToken({
   credentials,
   authConfig,
   displayName,
+  environment,
 }: {
   connectorId: string;
   userId: string;
   credentials: unknown;
   authConfig: Oauth2Config;
   displayName: string;
+  environment: string;
 }) {
   if (!authConfig?.refreshAccessToken) {
     throw new Error("We don't know how to refresh access tokens for this connector");
   }
-  const secretsConnection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsConnection.findOne({ connectorId });
+  const secretsCollection = await getCollection("connectorSecrets");
+  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   const refreshRequest = replaceTokens(authConfig.refreshAccessToken, { auth: credentials, secrets });
   const refreshResponse = await makeRequestInternal(refreshRequest);
   credentials = refreshResponse.data;
-  await putAuthCredentials({ connectorId, accessToken: userId, authCredentials: credentials as object, displayName });
+  await putAuthCredentials({
+    connectorId,
+    accessToken: userId,
+    authCredentials: credentials as object,
+    displayName,
+    environment,
+  });
   return credentials;
 }
 
@@ -142,21 +157,23 @@ export async function makeRequest({
   connectorId,
   credentialToken,
   request,
+  environment,
 }: {
   connectorId: string;
   credentialToken: string;
   request: RequestSchema;
+  environment: string;
 }): Promise<MakeRequestResponse> {
-  await verifyConnectorId(connectorId);
+  await verifyConnectorId(connectorId, environment);
   const { payload } = await decryptJWT(credentialToken, { audience: AUD_CREDENTIAL_TOKEN });
   const userId = payload.sub || "";
   verifyRequestSchema(request);
-  const connector = await getConnectorSchema(connectorId, "production");
+  const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
     throw new InvalidParamsError("Unknown connector ID");
   }
   const collection = await getCollection("authCredentials");
-  const doc = await collection.findOne({ connectorId, key: String(payload.credentialKey) });
+  const doc = await collection.findOne({ connectorId, environment, key: String(payload.credentialKey) });
   if (!doc) {
     throw new InvalidParamsError("No credentials found");
   }
@@ -182,6 +199,7 @@ export async function makeRequest({
           credentials,
           authConfig,
           displayName: doc.displayName,
+          environment,
         });
         accessTokenRefreshed = true;
       }
@@ -207,6 +225,7 @@ export async function makeRequest({
         credentials,
         authConfig,
         displayName: doc.displayName,
+        environment,
       });
       accessTokenRefreshed = true;
       request = replaceTokens(originalRequest, { auth: credentials });
@@ -237,8 +256,8 @@ export async function getConnectorAuthorizeUrl({
   } else {
     throw new InvalidParamsError("Connector doesn't support authorization");
   }
-  const secretsConnection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsConnection.findOne({ connectorId });
+  const secretsCollection = await getCollection("connectorSecrets");
+  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   return replaceTokens(url, { secrets });
 }
@@ -265,8 +284,8 @@ export async function completeConnectorAuthorization({
   } else {
     throw new InvalidParamsError("Connector doesn't support authorization");
   }
-  const secretsConnection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsConnection.findOne({ connectorId });
+  const secretsCollection = await getCollection("connectorSecrets");
+  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   const resp = await makeRequestInternal(replaceTokens(request, { ...params, secrets }));
   const internalCredentials = await putAuthCredentials({
@@ -274,6 +293,7 @@ export async function completeConnectorAuthorization({
     accessToken,
     authCredentials: resp.data as object,
     displayName,
+    environment,
   });
   return { ...(resp.data as object), _grinderyCredentialToken: internalCredentials.token };
 }

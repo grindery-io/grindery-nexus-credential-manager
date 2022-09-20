@@ -6,11 +6,13 @@ type DbSchema = {
   connectorSecrets: {
     connectorId: string;
     secrets: string; // JSON string
+    environment: string;
     updatedAt: number; // milliseconds since epoch
   };
   authCredentials: {
     key: string;
     connectorId: string;
+    environment: string;
     userId: string;
     authCredentials: string; // JSON string
     displayName: string;
