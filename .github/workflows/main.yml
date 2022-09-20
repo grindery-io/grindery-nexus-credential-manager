@@ -1,47 +1,33 @@
-# This is a basic workflow to help you get started with Actions
+name: Deploy
 
-name: Deploy to Google Cloud Functions
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the main branch
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [ "master", "main", "staging" ]
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  call-deployer:
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
-
-      - uses: actions/setup-node@v3
+      - name: grindery-action-dispatcher token
+        id: grindery-action-dispatcher
+        uses: getsentry/action-github-app-token@v1
         with:
-          node-version: 16
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
-      
-      - run: npm install
-
-      - id: 'auth'
-        name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v0'
+          app_id: ${{ secrets.DISPATCHER_APP_ID }}
+          private_key: ${{ secrets.DISPATCHER_APP_PRIVATE_KEY }}
+      - uses: actions/github-script@v6
+        env:
+          TARGET_REPO: ${{ secrets.DISPATCHER_TARGET_REPO }}
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - run: npm run deploy
+          github-token: ${{ steps.grindery-action-dispatcher.outputs.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: process.env.TARGET_REPO,
+              workflow_id: 'main.yml',
+              ref: 'main',
+              inputs: {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: process.env.GITHUB_REF_NAME,
+              },
+            });
