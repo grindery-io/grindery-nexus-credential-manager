@@ -1,10 +1,8 @@
-import {URL} from "node:url";
+import { URL } from "node:url";
 import * as jose from "jose";
-import { getJwtTools } from "grindery-nexus-common-utils";
+import { getJwtTools, TypedJWTPayload } from "grindery-nexus-common-utils";
 
 export const ISSUER = "urn:grindery:credential-manager";
-
-export const AUD_CREDENTIAL_TOKEN = "urn:grindery:credential-token:v1";
 
 const jwtTools = getJwtTools(ISSUER);
 jwtTools.getPublicJwk().catch((e) => {
@@ -15,11 +13,23 @@ jwtTools.getPublicJwk().catch((e) => {
 const { encryptJWT, decryptJWT, signJWT, verifyJWT, getPublicJwk } = jwtTools;
 export { encryptJWT, decryptJWT, signJWT, verifyJWT, getPublicJwk };
 
+type AccessTokenExtra =
+  | {
+      _?: never;
+    }
+  | {
+      workspace: string;
+      role: "admin" | "user";
+    };
+export type TAccessToken = TypedJWTPayload<AccessTokenExtra>;
+
 const ORCHESTRATOR_KEY = jose.createRemoteJWKSet(new URL("https://orchestrator.grindery.org/oauth/jwks"));
-export async function parseUserAccessToken(token: string) {
+export async function parseUserAccessToken(token: string): Promise<TAccessToken> {
   const { payload } = await jose.jwtVerify(token, ORCHESTRATOR_KEY, {
     issuer: "urn:grindery:orchestrator",
     audience: "urn:grindery:access-token:v1",
   });
   return payload;
 }
+
+export const CredentialToken = jwtTools.typedCipher<{ credentialKey: string }>("urn:grindery:credential-token:v1");

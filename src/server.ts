@@ -1,4 +1,4 @@
-import { createJsonRpcServer, forceObject, runJsonRpcServer } from "grindery-nexus-common-utils";
+import { createJsonRpcServer, forceObject, runJsonRpcServer, ServerParams } from "grindery-nexus-common-utils";
 
 import {
   getAuthCredentialsDisplayInfo,
@@ -7,14 +7,58 @@ import {
   putConnectorSecrets,
   getConnectorAuthorizeUrl,
   completeConnectorAuthorization,
+  updateAuthCredentials,
+  deleteAuthCredentials,
 } from "./credentialManager";
 
+import {
+  createJSONRPCErrorResponse,
+  JSONRPCErrorCode,
+  JSONRPCRequest,
+  JSONRPCServerMiddlewareNext,
+} from "json-rpc-2.0";
+import assert from "assert";
+import { parseUserAccessToken, TAccessToken } from "./jwt";
+
+export type Context = {
+  user?: TAccessToken;
+};
+
+const authMiddleware = async (
+  next: JSONRPCServerMiddlewareNext<ServerParams>,
+  request: JSONRPCRequest,
+  serverParams: ServerParams<Context> | undefined
+) => {
+  let token = "";
+  if (serverParams?.req) {
+    const m = /Bearer +(.+$)/i.exec(serverParams.req.get("Authorization") || "");
+    if (m) {
+      token = m[1];
+    }
+  } else if (["authenticate"].includes(request.method)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    token = (request.params as any)?.token || "";
+  }
+  if (token) {
+    assert(serverParams?.context);
+    try {
+      serverParams.context.user = await parseUserAccessToken(token);
+    } catch (e) {
+      return createJSONRPCErrorResponse(request.id || "", JSONRPCErrorCode.InvalidParams, "Invalid access token");
+    }
+  }
+  return await next(request, serverParams);
+};
+
 function createServer() {
-  const server = createJsonRpcServer();
+  const server = createJsonRpcServer<Context>();
+  server.applyMiddleware(authMiddleware);
   const methods = {
     putConnectorSecrets,
     putAuthCredentials,
     getAuthCredentialsDisplayInfo,
+    updateAuthCredentials,
+    deleteAuthCredentials,
     makeRequest,
     getConnectorAuthorizeUrl,
     completeConnectorAuthorization,

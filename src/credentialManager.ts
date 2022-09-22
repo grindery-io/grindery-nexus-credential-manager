@@ -8,7 +8,8 @@ import {
 import { getCollection } from "./db";
 import { makeRequestBasicDigest, makeRequestInternal, updateHeaders, verifyRequestSchema } from "./request";
 import { replaceTokens, InvalidParamsError, getConnectorSchema } from "grindery-nexus-common-utils";
-import { AUD_CREDENTIAL_TOKEN, decryptJWT, encryptJWT, parseUserAccessToken } from "./jwt";
+import { CredentialToken, TAccessToken } from "./jwt";
+import { Context } from "./server";
 
 async function verifyConnectorId(connectorId: string, environment: string) {
   if (typeof connectorId !== "string" || !/^[a-zA-Z0-9-_]+$/.test(connectorId)) {
@@ -39,25 +40,29 @@ export async function putConnectorSecrets({
     { upsert: true }
   );
 }
-async function getCredentialToken({ userId, credentialKey }: { userId: string; credentialKey: string }) {
-  return await encryptJWT({ aud: AUD_CREDENTIAL_TOKEN, sub: userId, credentialKey }, "100y");
+function getUserId(user?: TAccessToken): string {
+  if (!user?.sub) {
+    throw new Error("Not authorized");
+  }
+  if ("workspace" in user && user.workspace) {
+    return "grindery:workspace:" + user.workspace;
+  }
+  return user.sub;
 }
-export async function putAuthCredentials({
+async function putAuthCredentialsInternal({
   connectorId,
-  accessToken,
   authCredentials,
   displayName,
   environment,
+  userId,
 }: {
   connectorId: string;
-  accessToken: string;
   authCredentials: RequestSchema | object;
   displayName: string;
   environment: string;
+  userId: string;
 }) {
   await verifyConnectorId(connectorId, environment);
-  const parsedToken = await parseUserAccessToken(accessToken);
-  const userId = parsedToken.sub || "";
   if (typeof authCredentials !== "object") {
     throw new InvalidParamsError("Invalid auth credentials");
   }
@@ -89,32 +94,92 @@ export async function putAuthCredentials({
     updatedAt: Date.now(),
     createdAt: Date.now(),
   });
-  return { id: key, token: await getCredentialToken({ userId, credentialKey: key }) };
+  return { key, token: await CredentialToken.encrypt({ sub: userId, credentialKey: key }, "1000y") };
 }
-export async function getAuthCredentialsDisplayInfo({
-  connectorId,
-  accessToken,
-  environment,
-}: {
-  connectorId: string;
-  accessToken: string;
-  environment: string;
-}): Promise<AuthCredentialsDisplayInfo[]> {
+export async function putAuthCredentials(
+  {
+    connectorId,
+    authCredentials,
+    displayName,
+    environment,
+  }: {
+    connectorId: string;
+    authCredentials: RequestSchema | object;
+    displayName: string;
+    environment: string;
+  },
+  { context: { user } }: { context: Context }
+) {
+  return await putAuthCredentialsInternal({
+    connectorId,
+    authCredentials,
+    displayName,
+    environment,
+    userId: getUserId(user),
+  });
+}
+export async function updateAuthCredentials(
+  {
+    key,
+    displayName,
+    environment,
+  }: {
+    key: string;
+    displayName: string;
+    environment: string;
+  },
+  { context: { user } }: { context: Context }
+) {
+  const userId = getUserId(user);
+  const collection = await getCollection("authCredentials");
+  const result = await collection.updateOne(
+    { key, userId, environment },
+    { $set: { displayName, updatedAt: Date.now() } }
+  );
+  if (!result.matchedCount) {
+    throw new Error("Credential not found");
+  }
+  return result.matchedCount > 0;
+}
+export async function deleteAuthCredentials(
+  {
+    key,
+    environment,
+  }: {
+    key: string;
+    environment: string;
+  },
+  { context: { user } }: { context: Context }
+) {
+  const userId = getUserId(user);
+  const collection = await getCollection("authCredentials");
+  const result = await collection.deleteOne({ key, userId, environment });
+  return result.deletedCount > 0;
+}
+export async function getAuthCredentialsDisplayInfo(
+  {
+    connectorId,
+    environment,
+  }: {
+    connectorId: string;
+    environment: string;
+  },
+  { context: { user } }: { context: Context }
+): Promise<AuthCredentialsDisplayInfo[]> {
   await verifyConnectorId(connectorId, environment);
-  const parsedToken = await parseUserAccessToken(accessToken);
-  const userId = parsedToken.sub || "";
+  const userId = getUserId(user);
   const collection = await getCollection("authCredentials");
   const docs = await collection.find({ connectorId, userId, environment }).toArray();
   const ret = docs.map(
     (doc) =>
       ({
-        id: doc.key,
+        key: doc.key,
         name: doc.displayName?.toString() || "<unknown>",
         createdAt: new Date(doc.createdAt).toISOString(),
       } as AuthCredentialsDisplayInfo)
   );
   for (const item of ret) {
-    item.token = await getCredentialToken({ userId, credentialKey: item.id });
+    item.token = await CredentialToken.encrypt({ sub: userId, credentialKey: item.key }, "1000y");
   }
   return ret;
 }
@@ -143,12 +208,12 @@ async function refreshOauth2AccessToken({
   const refreshRequest = replaceTokens(authConfig.refreshAccessToken, { auth: credentials, secrets });
   const refreshResponse = await makeRequestInternal(refreshRequest);
   credentials = refreshResponse.data;
-  await putAuthCredentials({
+  await putAuthCredentialsInternal({
     connectorId,
-    accessToken: userId,
     authCredentials: credentials as object,
     displayName,
     environment,
+    userId,
   });
   return credentials;
 }
@@ -165,7 +230,7 @@ export async function makeRequest({
   environment: string;
 }): Promise<MakeRequestResponse> {
   await verifyConnectorId(connectorId, environment);
-  const { payload } = await decryptJWT(credentialToken, { audience: AUD_CREDENTIAL_TOKEN });
+  const payload = await CredentialToken.decrypt(credentialToken);
   const userId = payload.sub || "";
   verifyRequestSchema(request);
   const connector = await getConnectorSchema(connectorId, environment);
@@ -261,19 +326,20 @@ export async function getConnectorAuthorizeUrl({
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   return replaceTokens(url, { secrets });
 }
-export async function completeConnectorAuthorization({
-  connectorId,
-  environment,
-  params,
-  accessToken,
-  displayName,
-}: {
-  connectorId: string;
-  environment: string;
-  params: { code: string; redirect_uri: string };
-  accessToken: string;
-  displayName: string;
-}) {
+export async function completeConnectorAuthorization(
+  {
+    connectorId,
+    environment,
+    params,
+    displayName,
+  }: {
+    connectorId: string;
+    environment: string;
+    params: { code: string; redirect_uri: string };
+    displayName: string;
+  },
+  { context: { user } }: { context: Context }
+) {
   const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
     throw new InvalidParamsError("Unknown connector ID");
@@ -288,12 +354,14 @@ export async function completeConnectorAuthorization({
   const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   const resp = await makeRequestInternal(replaceTokens(request, { ...params, secrets }));
-  const internalCredentials = await putAuthCredentials({
-    connectorId,
-    accessToken,
-    authCredentials: resp.data as object,
-    displayName,
-    environment,
-  });
+  const internalCredentials = await putAuthCredentials(
+    {
+      connectorId,
+      authCredentials: resp.data as object,
+      displayName,
+      environment,
+    },
+    { context: { user } }
+  );
   return { ...(resp.data as object), _grinderyCredentialToken: internalCredentials.token };
 }
