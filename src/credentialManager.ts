@@ -11,6 +11,7 @@ import { replaceTokens, InvalidParamsError, getConnectorSchema } from "grindery-
 import { CredentialToken, TAccessToken } from "./jwt";
 import { Context } from "./server";
 import _ from "lodash";
+import { AxiosResponse } from "axios";
 
 async function verifyConnectorId(connectorId: string, environment: string) {
   if (typeof connectorId !== "string" || !/^[a-zA-Z0-9-_]+$/.test(connectorId)) {
@@ -247,15 +248,36 @@ export async function makeRequest({
   if (authType === "basic") {
     request.auth = [credentials.username, credentials.password];
   }
-  if (authType === "basic" || authType === "digest") {
-    return await makeRequestBasicDigest(request, credentials.username, credentials.password);
-  }
-  if (authType === "oauth2") {
-    let accessTokenRefreshed = false;
-    const authConfig = connector.authentication?.oauth2Config;
-    if (authConfig?.refreshAccessToken && authConfig?.autoRefresh && credentials.expires_in) {
-      const expiresAt = doc.updatedAt + credentials.expires_in * 1000;
-      if (expiresAt < Date.now() + 10000) {
+  try {
+    if (authType === "basic" || authType === "digest") {
+      return await makeRequestBasicDigest(request, credentials.username, credentials.password);
+    }
+    if (authType === "oauth2") {
+      let accessTokenRefreshed = false;
+      const authConfig = connector.authentication?.oauth2Config;
+      if (authConfig?.refreshAccessToken && authConfig?.autoRefresh && credentials.expires_in) {
+        const expiresAt = doc.updatedAt + credentials.expires_in * 1000;
+        if (expiresAt < Date.now() + 10000) {
+          credentials = await refreshOauth2AccessToken({
+            key: String(payload.credentialKey),
+            connectorId,
+            credentials,
+            authConfig,
+            environment,
+          });
+          accessTokenRefreshed = true;
+        }
+      }
+      request = replaceTokens(originalRequest, { auth: credentials });
+      try {
+        return await makeRequestInternal(request);
+      } catch (e) {
+        if (e.response?.status !== 401) {
+          throw e;
+        }
+        if (accessTokenRefreshed || !authConfig?.refreshAccessToken || !authConfig?.autoRefresh) {
+          throw e;
+        }
         credentials = await refreshOauth2AccessToken({
           key: String(payload.credentialKey),
           connectorId,
@@ -264,34 +286,25 @@ export async function makeRequest({
           environment,
         });
         accessTokenRefreshed = true;
+        request = replaceTokens(originalRequest, { auth: credentials });
+        if (credentials.access_token) {
+          request.headers = updateHeaders(request.headers || {}, {
+            Authorization: `Bearer ${credentials.access_token}`,
+          });
+        }
+        return await makeRequestInternal(request);
       }
     }
-    request = replaceTokens(originalRequest, { auth: credentials });
-    try {
-      return await makeRequestInternal(request);
-    } catch (e) {
-      if (e.response?.status !== 401) {
-        throw e;
-      }
-      if (accessTokenRefreshed || !authConfig?.refreshAccessToken || !authConfig?.autoRefresh) {
-        throw e;
-      }
-      credentials = await refreshOauth2AccessToken({
-        key: String(payload.credentialKey),
-        connectorId,
-        credentials,
-        authConfig,
-        environment,
-      });
-      accessTokenRefreshed = true;
-      request = replaceTokens(originalRequest, { auth: credentials });
-      if (credentials.access_token) {
-        request.headers = updateHeaders(request.headers || {}, {
-          Authorization: `Bearer ${credentials.access_token}`,
-        });
-      }
-      return await makeRequestInternal(request);
+  } catch (e) {
+    if (!e.response) {
+      throw e;
     }
+    const resp = e.response as AxiosResponse;
+    return {
+      status: resp.status,
+      data: resp.data,
+      headers: resp.headers,
+    };
   }
   throw new Error("Not implemented");
 }

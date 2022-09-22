@@ -59,6 +59,7 @@ export async function makeRequestInternal(request: RequestSchema): Promise<MakeR
     }
   }
   return {
+    status: resp.status,
     data,
     headers: resp.headers,
   };
