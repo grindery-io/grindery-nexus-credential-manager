@@ -22,15 +22,21 @@ async function verifyConnectorId(connectorId: string, environment: string) {
   }
 }
 
-export async function putConnectorSecrets({
-  connectorId,
-  secrets,
-  environment,
-}: {
-  connectorId: string;
-  secrets: { [key: string]: unknown };
-  environment: string;
-}) {
+export async function putConnectorSecrets(
+  {
+    connectorId,
+    secrets,
+    environment,
+  }: {
+    connectorId: string;
+    secrets: { [key: string]: unknown };
+    environment: string;
+  },
+  { context: { user } }: { context: Context }
+) {
+  if (!user || !("workspace" in user) || user.workspace !== "ADMIN") {
+    throw new Error("Only admin can update connector secret");
+  }
   await verifyConnectorId(connectorId, environment);
   if (typeof secrets !== "object") {
     throw new InvalidParamsError("Invalid secrets");
