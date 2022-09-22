@@ -1,3 +1,4 @@
+import { URL } from "node:url";
 import { v4 as uuidv4 } from "uuid";
 import {
   RequestSchema,
@@ -241,6 +242,18 @@ export async function makeRequest({
   const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
     throw new InvalidParamsError("Unknown connector ID");
+  }
+  if (connector.authentication?.allowedHosts) {
+    const url = new URL(request.url);
+    if (!connector.authentication.allowedHosts.includes(url.host)) {
+      return {
+        status: 403,
+        data: "Sending request to this host is not allowed",
+        headers: {
+          "content-type": "text/plain",
+        },
+      };
+    }
   }
   const collection = await getCollection("authCredentials");
   const doc = await collection.findOne({ connectorId, environment, key: String(payload.credentialKey) });
