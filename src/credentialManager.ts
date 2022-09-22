@@ -10,6 +10,7 @@ import { makeRequestBasicDigest, makeRequestInternal, updateHeaders, verifyReque
 import { replaceTokens, InvalidParamsError, getConnectorSchema } from "grindery-nexus-common-utils";
 import { CredentialToken, TAccessToken } from "./jwt";
 import { Context } from "./server";
+import _ from "lodash";
 
 async function verifyConnectorId(connectorId: string, environment: string) {
   if (typeof connectorId !== "string" || !/^[a-zA-Z0-9-_]+$/.test(connectorId)) {
@@ -185,18 +186,16 @@ export async function getAuthCredentialsDisplayInfo(
 }
 
 async function refreshOauth2AccessToken({
+  key,
   connectorId,
-  userId,
   credentials,
   authConfig,
-  displayName,
   environment,
 }: {
+  key: string;
   connectorId: string;
-  userId: string;
   credentials: unknown;
   authConfig: Oauth2Config;
-  displayName: string;
   environment: string;
 }) {
   if (!authConfig?.refreshAccessToken) {
@@ -208,13 +207,13 @@ async function refreshOauth2AccessToken({
   const refreshRequest = replaceTokens(authConfig.refreshAccessToken, { auth: credentials, secrets });
   const refreshResponse = await makeRequestInternal(refreshRequest);
   credentials = refreshResponse.data;
-  await putAuthCredentialsInternal({
-    connectorId,
-    authCredentials: credentials as object,
-    displayName,
-    environment,
-    userId,
-  });
+  const credentialCollection = await getCollection("authCredentials");
+  await credentialCollection.updateOne(
+    {
+      key,
+    },
+    { $set: { authCredentials: JSON.stringify(credentials), updatedAt: Date.now() } }
+  );
   return credentials;
 }
 
@@ -231,7 +230,6 @@ export async function makeRequest({
 }): Promise<MakeRequestResponse> {
   await verifyConnectorId(connectorId, environment);
   const payload = await CredentialToken.decrypt(credentialToken);
-  const userId = payload.sub || "";
   verifyRequestSchema(request);
   const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
@@ -243,8 +241,8 @@ export async function makeRequest({
     throw new InvalidParamsError("No credentials found");
   }
   let credentials = JSON.parse(doc.authCredentials);
-  const originalRequest = request;
-  request = replaceTokens(request, { auth: credentials });
+  const originalRequest = _.merge(connector.authentication?.authenticatedRequestTemplate || {}, request);
+  request = replaceTokens(originalRequest, { auth: credentials });
   const authType = connector.authentication?.type;
   if (authType === "basic") {
     request.auth = [credentials.username, credentials.password];
@@ -259,22 +257,16 @@ export async function makeRequest({
       const expiresAt = doc.updatedAt + credentials.expires_in * 1000;
       if (expiresAt < Date.now() + 10000) {
         credentials = await refreshOauth2AccessToken({
+          key: String(payload.credentialKey),
           connectorId,
-          userId,
           credentials,
           authConfig,
-          displayName: doc.displayName,
           environment,
         });
         accessTokenRefreshed = true;
       }
     }
     request = replaceTokens(originalRequest, { auth: credentials });
-    if (credentials.access_token) {
-      request.headers = updateHeaders(request.headers || {}, {
-        Authorization: `Bearer ${credentials.access_token}`,
-      });
-    }
     try {
       return await makeRequestInternal(request);
     } catch (e) {
@@ -285,11 +277,10 @@ export async function makeRequest({
         throw e;
       }
       credentials = await refreshOauth2AccessToken({
+        key: String(payload.credentialKey),
         connectorId,
-        userId,
         credentials,
         authConfig,
-        displayName: doc.displayName,
         environment,
       });
       accessTokenRefreshed = true;
