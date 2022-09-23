@@ -214,6 +214,9 @@ async function refreshOauth2AccessToken({
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   const refreshRequest = replaceTokens(authConfig.refreshAccessToken, { auth: credentials, secrets });
   const refreshResponse = await makeRequestInternal(refreshRequest);
+  if ((refreshResponse.status || 200) >= 400) {
+    throw new Error(`Failed to refresh token: ${refreshResponse.status} ${JSON.stringify(refreshResponse.data)}`);
+  }
   credentials = { ...(credentials as object), ...(refreshResponse.data as object) };
   const credentialCollection = await getCollection("authCredentials");
   await credentialCollection.updateOne(
