@@ -354,7 +354,7 @@ export async function completeConnectorAuthorization(
     connectorId: string;
     environment: string;
     params: { code: string; redirect_uri: string };
-    displayName: string;
+    displayName?: string;
   },
   { context: { user } }: { context: Context }
 ) {
@@ -376,10 +376,28 @@ export async function completeConnectorAuthorization(
     {
       connectorId,
       authCredentials: resp.data as object,
-      displayName,
+      displayName: displayName || new Date().toISOString(),
       environment,
     },
     { context: { user } }
   );
+  if (!displayName && connector.authentication.defaultDisplayName && connector.authentication.test) {
+    const testResponse = await makeRequest({
+      connectorId,
+      credentialToken: internalCredentials.token,
+      environment,
+      request: connector.authentication.test,
+    }).catch(() => ({ status: 500, data: {} }));
+    if ((testResponse.status || 200) === 200) {
+      const newDisplayName = replaceTokens(connector.authentication.defaultDisplayName, {
+        data: testResponse.data,
+        timestamp: new Date().toISOString(),
+      });
+      await updateAuthCredentials(
+        { key: internalCredentials.key, environment, displayName: newDisplayName },
+        { context: { user } }
+      );
+    }
+  }
   return { ...(resp.data as object), _grinderyCredentialToken: internalCredentials.token };
 }
