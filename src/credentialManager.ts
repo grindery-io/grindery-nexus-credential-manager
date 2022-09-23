@@ -7,7 +7,7 @@ import {
   Oauth2Config,
 } from "grindery-nexus-common-utils/dist/types";
 import { getCollection } from "./db";
-import { makeRequestBasicDigest, makeRequestInternal, updateHeaders, verifyRequestSchema } from "./request";
+import { makeRequestBasicDigest, makeRequestInternal, verifyRequestSchema } from "./request";
 import { replaceTokens, InvalidParamsError, getConnectorSchema } from "grindery-nexus-common-utils";
 import { CredentialToken, TAccessToken } from "./jwt";
 import { Context } from "./server";
@@ -306,11 +306,6 @@ export async function makeRequest({
         });
         accessTokenRefreshed = true;
         request = replaceTokens(originalRequest, { auth: credentials });
-        if (credentials.access_token) {
-          request.headers = updateHeaders(request.headers || {}, {
-            Authorization: `Bearer ${credentials.access_token}`,
-          });
-        }
         return await makeRequestInternal(request);
       }
     }
