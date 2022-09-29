@@ -232,15 +232,19 @@ export async function makeRequest({
   connectorId,
   credentialToken,
   request,
-  environment,
 }: {
   connectorId: string;
   credentialToken: string;
   request: RequestSchema;
-  environment: string;
 }): Promise<MakeRequestResponse> {
-  await verifyConnectorId(connectorId, environment);
   const payload = await CredentialToken.decrypt(credentialToken);
+  const collection = await getCollection("authCredentials");
+  const doc = await collection.findOne({ connectorId, key: String(payload.credentialKey) });
+  if (!doc) {
+    throw new InvalidParamsError("No credentials found");
+  }
+  const environment = doc.environment;
+  await verifyConnectorId(connectorId, environment);
   verifyRequestSchema(request);
   const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
@@ -257,11 +261,6 @@ export async function makeRequest({
         },
       };
     }
-  }
-  const collection = await getCollection("authCredentials");
-  const doc = await collection.findOne({ connectorId, environment, key: String(payload.credentialKey) });
-  if (!doc) {
-    throw new InvalidParamsError("No credentials found");
   }
   let credentials = JSON.parse(doc.authCredentials);
   const originalRequest = _.merge(connector.authentication?.authenticatedRequestTemplate || {}, request);
@@ -388,7 +387,6 @@ export async function completeConnectorAuthorization(
     const testResponse = await makeRequest({
       connectorId,
       credentialToken: internalCredentials.token,
-      environment,
       request: connector.authentication.test,
     }).catch(() => ({ status: 500, data: {} }));
     if ((testResponse.status || 200) === 200) {
