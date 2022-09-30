@@ -221,7 +221,10 @@ async function refreshOauth2AccessToken({
   );
   return credentials;
 }
-
+function normalizeHeaders<T extends RequestSchema | Partial<RequestSchema>>(request: T): T {
+  request.headers = Object.fromEntries(Object.entries(request.headers || []).map(([k, v]) => [k.toLowerCase(), v]));
+  return request;
+}
 export async function makeRequest({
   connectorId,
   credentialToken,
@@ -260,7 +263,11 @@ export async function makeRequest({
   const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   let credentials = JSON.parse(doc.authCredentials);
-  const originalRequest = _.merge(connector.authentication?.authenticatedRequestTemplate || {}, request);
+  normalizeHeaders(request);
+  const originalRequest = _.merge(
+    normalizeHeaders(connector.authentication?.authenticatedRequestTemplate || {}),
+    request
+  );
   request = replaceTokens(originalRequest, { auth: credentials, secrets });
   const authType = connector.authentication?.type;
   if (authType === "basic") {
