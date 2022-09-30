@@ -390,6 +390,7 @@ export async function completeConnectorAuthorization(
     if ((testResponse.status || 200) === 200) {
       displayName = replaceTokens(connector.authentication.defaultDisplayName, {
         data: testResponse.data,
+        auth: resp.data,
         timestamp: new Date().toISOString(),
       });
       await updateAuthCredentials({ key: internalCredentials.key, displayName }, { context: { user } });
