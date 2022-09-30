@@ -132,18 +132,16 @@ export async function updateAuthCredentials(
   {
     key,
     displayName,
-    environment,
   }: {
     key: string;
     displayName: string;
-    environment: string;
   },
   { context: { user } }: { context: Context }
 ) {
   const userId = getUserId(user);
   const collection = await getCollection("authCredentials");
   const result = await collection.updateOne(
-    { key, userId, environment },
+    { key, userId },
     { $set: { displayName, updatedAt: Date.now() } }
   );
   if (!result.matchedCount) {
@@ -154,16 +152,14 @@ export async function updateAuthCredentials(
 export async function deleteAuthCredentials(
   {
     key,
-    environment,
   }: {
     key: string;
-    environment: string;
   },
   { context: { user } }: { context: Context }
 ) {
   const userId = getUserId(user);
   const collection = await getCollection("authCredentials");
-  const result = await collection.deleteOne({ key, userId, environment });
+  const result = await collection.deleteOne({ key, userId });
   return result.deletedCount > 0;
 }
 export async function getAuthCredentialsDisplayInfo(
@@ -396,7 +392,7 @@ export async function completeConnectorAuthorization(
         data: testResponse.data,
         timestamp: new Date().toISOString(),
       });
-      await updateAuthCredentials({ key: internalCredentials.key, environment, displayName }, { context: { user } });
+      await updateAuthCredentials({ key: internalCredentials.key, displayName }, { context: { user } });
     }
   }
   return {
