@@ -140,10 +140,7 @@ export async function updateAuthCredentials(
 ) {
   const userId = getUserId(user);
   const collection = await getCollection("authCredentials");
-  const result = await collection.updateOne(
-    { key, userId },
-    { $set: { displayName, updatedAt: Date.now() } }
-  );
+  const result = await collection.updateOne({ key, userId }, { $set: { displayName, updatedAt: Date.now() } });
   if (!result.matchedCount) {
     throw new Error("Credential not found");
   }
@@ -259,9 +256,12 @@ export async function makeRequest({
       };
     }
   }
+  const secretsCollection = await getCollection("connectorSecrets");
+  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
+  const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   let credentials = JSON.parse(doc.authCredentials);
   const originalRequest = _.merge(connector.authentication?.authenticatedRequestTemplate || {}, request);
-  request = replaceTokens(originalRequest, { auth: credentials });
+  request = replaceTokens(originalRequest, { auth: credentials, secrets });
   const authType = connector.authentication?.type;
   if (authType === "basic") {
     request.auth = [credentials.username, credentials.password];
@@ -286,7 +286,7 @@ export async function makeRequest({
           accessTokenRefreshed = true;
         }
       }
-      request = replaceTokens(originalRequest, { auth: credentials });
+      request = replaceTokens(originalRequest, { auth: credentials, secrets });
       try {
         return await makeRequestInternal(request);
       } catch (e) {
@@ -304,7 +304,7 @@ export async function makeRequest({
           environment,
         });
         accessTokenRefreshed = true;
-        request = replaceTokens(originalRequest, { auth: credentials });
+        request = replaceTokens(originalRequest, { auth: credentials, secrets });
         return await makeRequestInternal(request);
       }
     }
