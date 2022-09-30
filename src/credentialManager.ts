@@ -93,6 +93,7 @@ async function putAuthCredentialsInternal({
   }
   const collection = await getCollection("authCredentials");
   const key = uuidv4();
+  const ts = Date.now();
   await collection.insertOne({
     key,
     connectorId,
@@ -100,10 +101,10 @@ async function putAuthCredentialsInternal({
     environment,
     authCredentials: JSON.stringify(authCredentials),
     displayName,
-    updatedAt: Date.now(),
-    createdAt: Date.now(),
+    updatedAt: ts,
+    createdAt: ts,
   });
-  return { key, token: await CredentialToken.encrypt({ sub: userId, credentialKey: key }, "1000y") };
+  return { key, createdAt: ts, token: await CredentialToken.encrypt({ sub: userId, credentialKey: key }, "1000y") };
 }
 export async function putAuthCredentials(
   {
@@ -359,7 +360,7 @@ export async function completeConnectorAuthorization(
     displayName?: string;
   },
   { context: { user } }: { context: Context }
-) {
+): Promise<AuthCredentialsDisplayInfo> {
   const connector = await getConnectorSchema(connectorId, environment);
   if (!connector) {
     throw new InvalidParamsError("Unknown connector ID");
@@ -374,11 +375,12 @@ export async function completeConnectorAuthorization(
   const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   const resp = await makeRequestInternal(replaceTokens(request, { ...params, secrets }));
+  const timestamp = new Date().toISOString();
   const internalCredentials = await putAuthCredentials(
     {
       connectorId,
       authCredentials: resp.data as object,
-      displayName: displayName || new Date().toISOString(),
+      displayName: displayName || timestamp,
       environment,
     },
     { context: { user } }
@@ -390,15 +392,17 @@ export async function completeConnectorAuthorization(
       request: connector.authentication.test,
     }).catch(() => ({ status: 500, data: {} }));
     if ((testResponse.status || 200) === 200) {
-      const newDisplayName = replaceTokens(connector.authentication.defaultDisplayName, {
+      displayName = replaceTokens(connector.authentication.defaultDisplayName, {
         data: testResponse.data,
         timestamp: new Date().toISOString(),
       });
-      await updateAuthCredentials(
-        { key: internalCredentials.key, environment, displayName: newDisplayName },
-        { context: { user } }
-      );
+      await updateAuthCredentials({ key: internalCredentials.key, environment, displayName }, { context: { user } });
     }
   }
-  return { ...(resp.data as object), _grinderyCredentialToken: internalCredentials.token };
+  return {
+    key: internalCredentials.key,
+    name: displayName || timestamp,
+    createdAt: new Date(internalCredentials.createdAt).toISOString(),
+    token: internalCredentials.token,
+  };
 }
