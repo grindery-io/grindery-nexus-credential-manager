@@ -234,11 +234,26 @@ export async function makeRequest({
   credentialToken: string;
   request: RequestSchema;
 }): Promise<MakeRequestResponse> {
-  const payload = await CredentialToken.decrypt(credentialToken);
+  const payload = await CredentialToken.decrypt(credentialToken).catch(() => null);
+  if (!payload) {
+    return {
+      status: 403,
+      data: "Invalid credential token",
+      headers: {
+        "content-type": "text/plain",
+      },
+    };
+  }
   const collection = await getCollection("authCredentials");
   const doc = await collection.findOne({ connectorId, key: String(payload.credentialKey) });
   if (!doc) {
-    throw new InvalidParamsError("No credentials found");
+    return {
+      status: 403,
+      data: "Credential token is no longer usable",
+      headers: {
+        "content-type": "text/plain",
+      },
+    };
   }
   const environment = doc.environment;
   await verifyConnectorId(connectorId, environment);
