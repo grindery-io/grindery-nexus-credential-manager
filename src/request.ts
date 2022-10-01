@@ -38,7 +38,10 @@ function logRequest(request: RequestSchema) {
 }
 function logResponse(response: AxiosResponse) {
   if (process.env.LOG_REQUEST) {
-    console.debug(`--> ${response.status} ${response.statusText} ${response.headers["content-length"] || "<no length>"}`, { data: response.data, request: response.config });
+    console.debug(
+      `--> ${response.status} ${response.statusText} ${response.headers["content-length"] || "<no length>"}`,
+      { data: response.data, headers: response.headers, request: response.config }
+    );
   }
 }
 export async function makeRequestInternal(request: RequestSchema): Promise<MakeRequestResponse> {
