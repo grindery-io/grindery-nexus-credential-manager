@@ -280,6 +280,7 @@ export async function makeRequest({
   let credentials = JSON.parse(doc.authCredentials);
   normalizeHeaders(request);
   const originalRequest = _.merge(
+    {},
     normalizeHeaders(connector.authentication?.authenticatedRequestTemplate || {}),
     request
   );
