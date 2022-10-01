@@ -1,5 +1,5 @@
+import { LoggerAdaptToConsole, LOG_LEVEL } from "console-log-json";
 import { createJsonRpcServer, forceObject, runJsonRpcServer, ServerParams } from "grindery-nexus-common-utils";
-
 import {
   getAuthCredentialsDisplayInfo,
   makeRequest,
@@ -19,6 +19,10 @@ import {
 } from "json-rpc-2.0";
 import assert from "assert";
 import { parseUserAccessToken, TAccessToken } from "./jwt";
+
+if (process.env.LOG_JSON) {
+  LoggerAdaptToConsole({ logLevel: LOG_LEVEL.debug });
+}
 
 export type Context = {
   user?: TAccessToken;

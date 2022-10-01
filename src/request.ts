@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { RequestSchema, MakeRequestResponse } from "grindery-nexus-common-utils/dist/types";
-import axios from "axios";
+import axios, { AxiosResponse } from "axios";
 import { InvalidParamsError } from "grindery-nexus-common-utils/dist/jsonrpc";
 
 export function verifyRequestSchema(request: RequestSchema) {
@@ -31,7 +31,18 @@ export function verifyRequestSchema(request: RequestSchema) {
     throw new InvalidParamsError("Invalid body for GET/HEAD request");
   }
 }
+function logRequest(request: RequestSchema) {
+  if (process.env.LOG_REQUEST) {
+    console.debug(`${request.method || "GET"} ${request.url}`, { request });
+  }
+}
+function logResponse(response: AxiosResponse) {
+  if (process.env.LOG_REQUEST) {
+    console.debug(`--> ${response.status}`, { data: response.data, request: response.request });
+  }
+}
 export async function makeRequestInternal(request: RequestSchema): Promise<MakeRequestResponse> {
+  logRequest(request);
   const resp = await axios({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     method: request.method || "GET",
@@ -49,7 +60,13 @@ export async function makeRequestInternal(request: RequestSchema): Promise<MakeR
     }),
     params: request.params,
     responseType: "text",
+  }).catch((e) => {
+    if (e.response) {
+      logResponse(e.response);
+    }
+    return Promise.reject(e);
   });
+  logResponse(resp);
   let data = resp.data;
   if (resp.headers["content-type"]?.includes("application/json")) {
     try {
