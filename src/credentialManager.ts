@@ -229,10 +229,12 @@ export async function makeRequest({
   connectorId,
   credentialToken,
   request,
+  templateScope,
 }: {
   connectorId: string;
   credentialToken: string;
   request: RequestSchema;
+  templateScope?: "all" | "headers";
 }): Promise<MakeRequestResponse> {
   const payload = await CredentialToken.decrypt(credentialToken).catch(() => null);
   if (!payload) {
@@ -278,20 +280,28 @@ export async function makeRequest({
   const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
   let credentials = JSON.parse(doc.authCredentials);
-  normalizeHeaders(request);
-  const originalRequest = _.merge(
-    {},
-    normalizeHeaders(connector.authentication?.authenticatedRequestTemplate || {}),
-    request
-  );
-  request = replaceTokens(originalRequest, { auth: credentials, secrets });
+  const getRequest = () => {
+    const context = {
+      auth: credentials,
+      secrets,
+    };
+    return _.merge(
+      {},
+      normalizeHeaders(replaceTokens(connector.authentication?.authenticatedRequestTemplate || {}, context)),
+      normalizeHeaders(
+        templateScope === "headers"
+          ? { ...request, headers: replaceTokens(request.headers || {}, context) }
+          : replaceTokens(request, context)
+      )
+    );
+  };
   const authType = connector.authentication?.type;
   if (authType === "basic") {
     request.auth = [credentials.username, credentials.password];
   }
   try {
     if (authType === "basic" || authType === "digest") {
-      return await makeRequestBasicDigest(request, credentials.username, credentials.password);
+      return await makeRequestBasicDigest(getRequest(), credentials.username, credentials.password);
     }
     if (authType === "oauth2") {
       let accessTokenRefreshed = false;
@@ -309,9 +319,8 @@ export async function makeRequest({
           accessTokenRefreshed = true;
         }
       }
-      request = replaceTokens(originalRequest, { auth: credentials, secrets });
       try {
-        return await makeRequestInternal(request);
+        return await makeRequestInternal(getRequest());
       } catch (e) {
         if (e.response?.status !== 401) {
           throw e;
@@ -327,8 +336,7 @@ export async function makeRequest({
           environment,
         });
         accessTokenRefreshed = true;
-        request = replaceTokens(originalRequest, { auth: credentials, secrets });
-        return await makeRequestInternal(request);
+        return await makeRequestInternal(getRequest());
       }
     }
   } catch (e) {
@@ -415,6 +423,7 @@ export async function completeConnectorAuthorization(
       connectorId,
       credentialToken: internalCredentials.token,
       request: connector.authentication.test,
+      templateScope: "all",
     }).catch(() => ({ status: 500, data: {} }));
     if ((testResponse.status || 200) === 200) {
       displayName = replaceTokens(connector.authentication.defaultDisplayName, {
