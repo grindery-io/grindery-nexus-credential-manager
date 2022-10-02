@@ -364,7 +364,13 @@ export async function getConnectorAuthorizeUrl({
   const secretsCollection = await getCollection("connectorSecrets");
   const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
   const secrets = JSON.parse(secretsDoc?.secrets || "{}");
-  return replaceTokens(url, { secrets });
+  url = replaceTokens(url, { secrets });
+  if (connector.authentication.oauth2Config.scope) {
+    const urlObj = new URL(url);
+    urlObj.searchParams.set("scope", connector.authentication.oauth2Config.scope);
+    url = urlObj.toString();
+  }
+  return url;
 }
 export async function completeConnectorAuthorization(
   {
