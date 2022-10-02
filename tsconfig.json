@@ -6,6 +6,9 @@
     "allowJs": true,
     "outDir": "./dist",
     "noImplicitAny": false,
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
     "useUnknownInCatchVariables": false
   }
 }
