@@ -4,10 +4,12 @@ let cachedClient: MongoClient | Promise<MongoClient> | null = null;
 
 type DbSchema = {
   connectorSecrets: {
+    key: string;
     connectorId: string;
     secrets: string; // JSON string
     environment: string;
     updatedAt: number; // milliseconds since epoch
+    createdAt: number; // milliseconds since epoch
   };
   authCredentials: {
     key: string;
@@ -15,6 +17,7 @@ type DbSchema = {
     environment: string;
     userId: string;
     authCredentials: string; // JSON string
+    secretKey: string;
     displayName: string;
     updatedAt: number; // milliseconds since epoch
     createdAt: number; // milliseconds since epoch

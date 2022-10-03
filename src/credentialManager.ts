@@ -22,32 +22,68 @@ async function verifyConnectorId(connectorId: string, environment: string) {
     throw new InvalidParamsError(`Connector ${connectorId} doesn't exist`);
   }
 }
-
+async function getConnectorSecretDoc({ connectorId, environment }: { connectorId: string; environment: string }) {
+  const secretsCollection = await getCollection("connectorSecrets");
+  const secretsDoc = await secretsCollection.find({ connectorId, environment }).sort({ createdAt: -1 }).next();
+  if (!secretsDoc) {
+    throw new InvalidParamsError("Connector secret is not configured");
+  }
+  return secretsDoc;
+}
 export async function putConnectorSecrets(
   {
+    key,
     connectorId,
     secrets,
     environment,
+    forceCreateNew,
   }: {
+    key?: string;
     connectorId: string;
     secrets: { [key: string]: unknown };
     environment: string;
+    forceCreateNew?: boolean;
   },
   { context: { user } }: { context: Context }
 ) {
   if (!user || !("workspace" in user) || user.workspace !== "ADMIN") {
     throw new Error("Only admin can update connector secret");
   }
+  if (key && forceCreateNew) {
+    throw new InvalidParamsError("Can't create new secret when key is set");
+  }
   await verifyConnectorId(connectorId, environment);
   if (typeof secrets !== "object") {
     throw new InvalidParamsError("Invalid secrets");
   }
   const collection = await getCollection("connectorSecrets");
-  await collection.replaceOne(
-    { connectorId, environment },
-    { connectorId, environment, secrets: JSON.stringify(secrets), updatedAt: Date.now() },
-    { upsert: true }
+  if (!key && !forceCreateNew) {
+    const latestDoc = await collection.find({ connectorId, environment }).sort({ createdAt: -1 }).next();
+    if (latestDoc) {
+      key = latestDoc.key;
+    } else {
+      forceCreateNew = true;
+    }
+  }
+  if (forceCreateNew) {
+    const key = uuidv4();
+    await collection.insertOne({
+      key,
+      connectorId,
+      environment,
+      secrets: JSON.stringify(secrets),
+      updatedAt: Date.now(),
+      createdAt: Date.now(),
+    });
+    return { key };
+  }
+  const result = await collection.updateOne(
+    { connectorId, environment, key },
+    { $set: { secrets: JSON.stringify(secrets), updatedAt: Date.now() } }
   );
+  if (result.modifiedCount < 1) {
+    throw new Error("Invalid connector secret key");
+  }
 }
 function getUserId(user?: TAccessToken): string {
   if (!user?.sub) {
@@ -64,12 +100,14 @@ async function putAuthCredentialsInternal({
   displayName,
   environment,
   userId,
+  secretKey,
 }: {
   connectorId: string;
   authCredentials: RequestSchema | object;
   displayName: string;
   environment: string;
   userId: string;
+  secretKey?: string;
 }) {
   await verifyConnectorId(connectorId, environment);
   if (typeof authCredentials !== "object") {
@@ -91,6 +129,15 @@ async function putAuthCredentialsInternal({
       throw new InvalidParamsError("Invalid auth credentials");
     }
   }
+  if (!secretKey) {
+    const secretDoc = await getConnectorSecretDoc({ connectorId, environment });
+    secretKey = secretDoc.key;
+  } else {
+    const secretsCollection = await getCollection("connectorSecrets");
+    if (!(await secretsCollection.findOne({ connectorId, environment, key: secretKey }))) {
+      throw new InvalidParamsError("Invalid connector secret key");
+    }
+  }
   const collection = await getCollection("authCredentials");
   const key = uuidv4();
   const ts = Date.now();
@@ -101,6 +148,7 @@ async function putAuthCredentialsInternal({
     environment,
     authCredentials: JSON.stringify(authCredentials),
     displayName,
+    secretKey,
     updatedAt: ts,
     createdAt: ts,
   });
@@ -112,11 +160,13 @@ export async function putAuthCredentials(
     authCredentials,
     displayName,
     environment,
+    secretKey,
   }: {
     connectorId: string;
     authCredentials: RequestSchema | object;
     displayName: string;
     environment: string;
+    secretKey?: string;
   },
   { context: { user } }: { context: Context }
 ) {
@@ -125,6 +175,7 @@ export async function putAuthCredentials(
     authCredentials,
     displayName,
     environment,
+    secretKey,
     userId: getUserId(user),
   });
 }
@@ -193,20 +244,28 @@ async function refreshOauth2AccessToken({
   credentials,
   authConfig,
   environment,
+  secretKey,
 }: {
   key: string;
   connectorId: string;
   credentials: unknown;
   authConfig: Oauth2Config;
   environment: string;
+  secretKey: string;
 }) {
   if (!authConfig?.refreshAccessToken) {
     throw new Error("We don't know how to refresh access tokens for this connector");
   }
   const secretsCollection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
-  const secrets = JSON.parse(secretsDoc?.secrets || "{}");
-  const refreshRequest = replaceTokens(authConfig.refreshAccessToken, { auth: credentials, secrets });
+  const secretsDoc = await secretsCollection.findOne({ connectorId, environment, key: secretKey });
+  if (!secretsDoc) {
+    throw new Error("Invalid connector secret key");
+  }
+  const secrets = JSON.parse(secretsDoc.secrets || "{}");
+  const refreshRequest = replaceTokens(authConfig.refreshAccessToken, {
+    auth: credentials,
+    secrets,
+  });
   const refreshResponse = await makeRequestInternal(refreshRequest);
   if ((refreshResponse.status || 200) >= 400) {
     throw new Error(`Failed to refresh token: ${refreshResponse.status} ${JSON.stringify(refreshResponse.data)}`);
@@ -303,8 +362,11 @@ export async function makeRequest(
     }
   }
   const secretsCollection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
-  const secrets = JSON.parse(secretsDoc?.secrets || "{}");
+  const secretsDoc = await secretsCollection.findOne({ connectorId, environment, key: doc.secretKey });
+  if (!secretsDoc) {
+    throw new Error("Invalid connector secret key");
+  }
+  const secrets = JSON.parse(secretsDoc.secrets || "{}");
   let credentials = JSON.parse(doc.authCredentials);
   const getRequest = () => {
     const context = {
@@ -341,6 +403,7 @@ export async function makeRequest(
             credentials,
             authConfig,
             environment,
+            secretKey: doc.secretKey,
           });
           accessTokenRefreshed = true;
         }
@@ -360,6 +423,7 @@ export async function makeRequest(
           credentials,
           authConfig,
           environment,
+          secretKey: doc.secretKey,
         });
         accessTokenRefreshed = true;
         return await makeRequestInternal(getRequest());
@@ -395,9 +459,8 @@ export async function getConnectorAuthorizeUrl({
   } else {
     throw new InvalidParamsError("Connector doesn't support authorization");
   }
-  const secretsCollection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
-  const secrets = JSON.parse(secretsDoc?.secrets || "{}");
+  const secretsDoc = await getConnectorSecretDoc({ connectorId, environment });
+  const secrets = JSON.parse(secretsDoc.secrets || "{}");
   url = replaceTokens(url, { secrets });
   if (connector.authentication.oauth2Config.scope) {
     const urlObj = new URL(url);
@@ -430,9 +493,8 @@ export async function completeConnectorAuthorization(
   } else {
     throw new InvalidParamsError("Connector doesn't support authorization");
   }
-  const secretsCollection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsCollection.findOne({ connectorId, environment });
-  const secrets = JSON.parse(secretsDoc?.secrets || "{}");
+  const secretDoc = await getConnectorSecretDoc({ connectorId, environment });
+  const secrets = JSON.parse(secretDoc.secrets || "{}");
   const resp = await makeRequestInternal(replaceTokens(request, { ...params, secrets }));
   const timestamp = new Date().toISOString();
   const internalCredentials = await putAuthCredentials(
@@ -441,6 +503,7 @@ export async function completeConnectorAuthorization(
       authCredentials: resp.data as object,
       displayName: displayName || timestamp,
       environment,
+      secretKey: secretDoc.key,
     },
     { context: { user } }
   );
