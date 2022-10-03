@@ -225,24 +225,29 @@ function normalizeHeaders<T extends RequestSchema | Partial<RequestSchema>>(requ
   request.headers = Object.fromEntries(Object.entries(request.headers || []).map(([k, v]) => [k.toLowerCase(), v]));
   return request;
 }
-export async function makeRequest({
-  connectorId,
-  credentialToken,
-  request,
-  templateScope,
-}: {
-  connectorId: string;
-  credentialToken: string;
-  request: RequestSchema;
-  templateScope?: "all" | "headers";
-}): Promise<MakeRequestResponse> {
+export async function makeRequest(
+  {
+    connectorId,
+    credentialToken,
+    request,
+    templateScope,
+    rejectProduction,
+  }: {
+    connectorId: string;
+    credentialToken: string;
+    request: RequestSchema;
+    templateScope?: "all" | "headers";
+    rejectProduction?: boolean;
+  },
+  { context: { user } }: { context: Context } = { context: {} }
+): Promise<MakeRequestResponse> {
   const payload = await CredentialToken.decrypt(credentialToken).catch(() => null);
   if (!payload) {
     return {
       status: 403,
-      data: "Invalid credential token",
+      data: { error: "Invalid credential token" },
       headers: {
-        "content-type": "text/plain",
+        "content-type": "application/json",
       },
     };
   }
@@ -251,9 +256,28 @@ export async function makeRequest({
   if (!doc) {
     return {
       status: 403,
-      data: "Credential token is no longer usable",
+      data: { error: "Credential token is no longer usable" },
       headers: {
-        "content-type": "text/plain",
+        "content-type": "application/json",
+      },
+    };
+  }
+  // User is optional, this is for debugging only
+  if (user && doc.userId !== getUserId(user)) {
+    return {
+      status: 403,
+      data: { error: "User token is supplied, but the credential token is not usable by this user" },
+      headers: {
+        "content-type": "application/json",
+      },
+    };
+  }
+  if (rejectProduction && doc.environment === "production") {
+    return {
+      status: 403,
+      data: { error: "Production usage is not allowed because the driver doesn't meet deployment requirement" },
+      headers: {
+        "content-type": "application/json",
       },
     };
   }
@@ -269,9 +293,11 @@ export async function makeRequest({
     if (!connector.authentication.allowedHosts.includes(url.host)) {
       return {
         status: 403,
-        data: "Sending request to this host is not allowed",
+        data: {
+          error: `Sending request to ${url.host} is not allowed. If this is a legitimate request, update CDS file to include this host.`,
+        },
         headers: {
-          "content-type": "text/plain",
+          "content-type": "application/json",
         },
       };
     }
