@@ -1,3 +1,4 @@
+/* eslint-disable no-use-before-define */
 import { URL } from "node:url";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -104,7 +105,7 @@ async function putAuthCredentialsInternal({
 }: {
   connectorId: string;
   authCredentials: RequestSchema | object;
-  displayName: string;
+  displayName?: string;
   environment: string;
   userId: string;
   secretKey?: string;
@@ -116,7 +117,7 @@ async function putAuthCredentialsInternal({
   if ("url" in authCredentials) {
     verifyRequestSchema(authCredentials as RequestSchema);
   }
-  if (typeof displayName !== "string" || !displayName) {
+  if (displayName && typeof displayName !== "string") {
     throw new InvalidParamsError("Invalid display name");
   }
   const connector = await getConnectorSchema(connectorId, environment);
@@ -147,12 +148,29 @@ async function putAuthCredentialsInternal({
     userId,
     environment,
     authCredentials: JSON.stringify(authCredentials),
-    displayName,
+    displayName: displayName || new Date().toISOString(),
     secretKey,
     updatedAt: ts,
     createdAt: ts,
   });
-  return { key, createdAt: ts, token: await CredentialToken.encrypt({ sub: userId, credentialKey: key }, "1000y") };
+  const token = await CredentialToken.encrypt({ sub: userId, credentialKey: key }, "1000y");
+  if (!displayName && connector.authentication?.defaultDisplayName && connector.authentication.test) {
+    const testResponse = await makeRequest({
+      connectorId,
+      credentialToken: token,
+      request: connector.authentication.test,
+      templateScope: "all",
+    }).catch(() => ({ status: 500, data: {} }));
+    if ((testResponse.status || 200) === 200) {
+      displayName = replaceTokens(connector.authentication.defaultDisplayName, {
+        data: testResponse.data,
+        auth: authCredentials,
+        timestamp: new Date().toISOString(),
+      });
+      await collection.updateOne({ key }, { $set: { displayName } });
+    }
+  }
+  return { key, createdAt: ts, token };
 }
 export async function putAuthCredentials(
   {
@@ -164,7 +182,7 @@ export async function putAuthCredentials(
   }: {
     connectorId: string;
     authCredentials: RequestSchema | object;
-    displayName: string;
+    displayName?: string;
     environment: string;
     secretKey?: string;
   },
@@ -501,28 +519,12 @@ export async function completeConnectorAuthorization(
     {
       connectorId,
       authCredentials: resp.data as object,
-      displayName: displayName || timestamp,
+      displayName,
       environment,
       secretKey: secretDoc.key,
     },
     { context: { user } }
   );
-  if (!displayName && connector.authentication.defaultDisplayName && connector.authentication.test) {
-    const testResponse = await makeRequest({
-      connectorId,
-      credentialToken: internalCredentials.token,
-      request: connector.authentication.test,
-      templateScope: "all",
-    }).catch(() => ({ status: 500, data: {} }));
-    if ((testResponse.status || 200) === 200) {
-      displayName = replaceTokens(connector.authentication.defaultDisplayName, {
-        data: testResponse.data,
-        auth: resp.data,
-        timestamp: new Date().toISOString(),
-      });
-      await updateAuthCredentials({ key: internalCredentials.key, displayName }, { context: { user } });
-    }
-  }
   return {
     key: internalCredentials.key,
     name: displayName || timestamp,
