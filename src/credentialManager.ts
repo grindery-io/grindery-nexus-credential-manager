@@ -142,13 +142,14 @@ async function putAuthCredentialsInternal({
   const collection = await getCollection("authCredentials");
   const key = uuidv4();
   const ts = Date.now();
+  const tsString = new Date(ts).toISOString();
   await collection.insertOne({
     key,
     connectorId,
     userId,
     environment,
     authCredentials: JSON.stringify(authCredentials),
-    displayName: displayName || new Date().toISOString(),
+    displayName: displayName || tsString,
     secretKey,
     updatedAt: ts,
     createdAt: ts,
@@ -165,12 +166,12 @@ async function putAuthCredentialsInternal({
       displayName = replaceTokens(connector.authentication.defaultDisplayName, {
         data: testResponse.data,
         auth: authCredentials,
-        timestamp: new Date().toISOString(),
+        timestamp: tsString,
       });
       await collection.updateOne({ key }, { $set: { displayName } });
     }
   }
-  return { key, createdAt: ts, token };
+  return { key, createdAt: ts, token, displayName: displayName || tsString };
 }
 export async function putAuthCredentials(
   {
@@ -514,7 +515,6 @@ export async function completeConnectorAuthorization(
   const secretDoc = await getConnectorSecretDoc({ connectorId, environment });
   const secrets = JSON.parse(secretDoc.secrets || "{}");
   const resp = await makeRequestInternal(replaceTokens(request, { ...params, secrets }));
-  const timestamp = new Date().toISOString();
   const internalCredentials = await putAuthCredentials(
     {
       connectorId,
@@ -527,7 +527,7 @@ export async function completeConnectorAuthorization(
   );
   return {
     key: internalCredentials.key,
-    name: displayName || timestamp,
+    name: internalCredentials.displayName,
     createdAt: new Date(internalCredentials.createdAt).toISOString(),
     token: internalCredentials.token,
   };
