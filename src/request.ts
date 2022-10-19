@@ -36,11 +36,21 @@ function logRequest(request: RequestSchema) {
     console.debug(`${request.method || "GET"} ${request.url}`, { request });
   }
 }
+function trimResponseData(data: unknown) {
+  if (Buffer.isBuffer(data)) {
+    return `<Buffer (${data.length} bytes): ${data.subarray(0, 128).toString("hex")}${data.length > 128 ? "..." : ""}>`;
+  }
+  const stringified = typeof data === "string" ? data : JSON.stringify(data);
+  if (stringified.length < 4096) {
+    return data;
+  }
+  return `[${stringified.length} chars] ${stringified.slice(0, 4096)} ...`;
+}
 function logResponse(response: AxiosResponse) {
   if (process.env.LOG_REQUEST) {
     console.debug(
       `--> ${response.status} ${response.statusText} ${response.headers["content-length"] || "<no length>"}`,
-      { data: response.data, headers: response.headers, request: response.config }
+      { data: trimResponseData(response.data), headers: response.headers, request: response.config }
     );
   }
 }
