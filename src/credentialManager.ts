@@ -303,6 +303,9 @@ function normalizeHeaders<T extends RequestSchema | Partial<RequestSchema>>(requ
   request.headers = Object.fromEntries(Object.entries(request.headers || []).map(([k, v]) => [k.toLowerCase(), v]));
   return request;
 }
+function isEquivalentConnector(id1: string, id2: string) {
+  return [id1, id2].every((x) => ["web3", "flow"].includes(x));
+}
 export async function makeRequest(
   {
     connectorId,
@@ -330,11 +333,20 @@ export async function makeRequest(
     };
   }
   const collection = await getCollection("authCredentials");
-  const doc = await collection.findOne({ connectorId, key: String(payload.credentialKey) });
+  const doc = await collection.findOne({ key: String(payload.credentialKey) });
   if (!doc) {
     return {
       status: 403,
       data: { error: "Credential token is no longer usable" },
+      headers: {
+        "content-type": "application/json",
+      },
+    };
+  }
+  if (doc.connectorId !== connectorId && !isEquivalentConnector(connectorId, doc.connectorId)) {
+    return {
+      status: 403,
+      data: { error: "Credential token is not for this connector" },
       headers: {
         "content-type": "application/json",
       },
