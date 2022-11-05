@@ -393,7 +393,7 @@ export async function makeRequest(
     }
   }
   const secretsCollection = await getCollection("connectorSecrets");
-  const secretsDoc = await secretsCollection.findOne({ connectorId, environment, key: doc.secretKey });
+  const secretsDoc = await secretsCollection.findOne({ environment, key: doc.secretKey });
   if (!secretsDoc) {
     throw new Error("Invalid connector secret key");
   }
