@@ -9,6 +9,7 @@ import {
   completeConnectorAuthorization,
   updateAuthCredentials,
   deleteAuthCredentials,
+  deleteAllAuthCredentials,
 } from "./credentialManager";
 
 import {
@@ -63,6 +64,8 @@ function createServer() {
     getAuthCredentialsDisplayInfo,
     updateAuthCredentials,
     deleteAuthCredentials,
+    deleteAllAuthCredentials,
+
     makeRequest,
     getConnectorAuthorizeUrl,
     completeConnectorAuthorization,
