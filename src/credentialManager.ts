@@ -229,6 +229,12 @@ export async function deleteAuthCredentials(
   const result = await collection.deleteOne({ key, userId });
   return result.deletedCount > 0;
 }
+export async function deleteAllAuthCredentials(_, { context: { user } }: { context: Context }) {
+  const userId = getUserId(user);
+  const collection = await getCollection("authCredentials");
+  const result = await collection.deleteMany({ userId });
+  return result.deletedCount > 0;
+}
 export async function getAuthCredentialsDisplayInfo(
   {
     connectorId,
