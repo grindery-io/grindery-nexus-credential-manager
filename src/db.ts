@@ -19,6 +19,7 @@ type DbSchema = {
     authCredentials: string; // JSON string
     secretKey: string;
     displayName: string;
+    invalid?: boolean; // Failed to refresh
     updatedAt: number; // milliseconds since epoch
     createdAt: number; // milliseconds since epoch
   };

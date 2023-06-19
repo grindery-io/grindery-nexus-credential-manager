@@ -1,3 +1,4 @@
+/* eslint-disable no-catch-shadow */
 /* eslint-disable no-use-before-define */
 import { URL } from "node:url";
 import { v4 as uuidv4 } from "uuid";
@@ -239,21 +240,26 @@ export async function getAuthCredentialsDisplayInfo(
   {
     connectorId,
     environment,
+    includeInvalid,
   }: {
     connectorId: string;
     environment: string;
+    includeInvalid?: boolean;
   },
   { context: { user } }: { context: Context }
 ): Promise<AuthCredentialsDisplayInfo[]> {
   await verifyConnectorId(connectorId, environment);
   const userId = getUserId(user);
   const collection = await getCollection("authCredentials");
-  const docs = await collection.find({ connectorId, userId, environment }).toArray();
+  const docs = await collection
+    .find({ connectorId, userId, environment, ...(includeInvalid ? { invalid: { $ne: true } } : {}) })
+    .toArray();
   const ret = docs.map(
     (doc) =>
       ({
         key: doc.key,
         name: doc.displayName?.toString() || "<unknown>",
+        invalid: !!doc.invalid,
         createdAt: new Date(doc.createdAt).toISOString(),
       } as AuthCredentialsDisplayInfo)
   );
@@ -293,7 +299,11 @@ async function refreshOauth2AccessToken({
   });
   const refreshResponse = await makeRequestInternal(refreshRequest);
   if ((refreshResponse.status || 200) >= 400) {
-    throw new Error(`Failed to refresh token: ${refreshResponse.status} ${JSON.stringify(refreshResponse.data)}`);
+    const e: Error & { status?: number } = new Error(
+      `Failed to refresh token: ${refreshResponse.status} ${JSON.stringify(refreshResponse.data)}`
+    );
+    e.status = refreshResponse.status;
+    throw e;
   }
   credentials = { ...(credentials as object), ...(refreshResponse.data as object) };
   const credentialCollection = await getCollection("authCredentials");
@@ -434,14 +444,21 @@ export async function makeRequest(
       if (authConfig?.refreshAccessToken && authConfig?.autoRefresh && credentials.expires_in) {
         const expiresAt = doc.updatedAt + credentials.expires_in * 1000;
         if (expiresAt < Date.now() + 10000) {
-          credentials = await refreshOauth2AccessToken({
-            key: String(payload.credentialKey),
-            connectorId,
-            credentials,
-            authConfig,
-            environment,
-            secretKey: doc.secretKey,
-          });
+          try {
+            credentials = await refreshOauth2AccessToken({
+              key: String(payload.credentialKey),
+              connectorId,
+              credentials,
+              authConfig,
+              environment,
+              secretKey: doc.secretKey,
+            });
+          } catch (e) {
+            if (e.status && e.status >= 400 && e.status <= 499 && !doc.invalid) {
+              await collection.updateOne({ key: payload.credentialKey }, { invalid: true }).catch(() => null);
+            }
+            throw e;
+          }
           accessTokenRefreshed = true;
         }
       }
@@ -454,14 +471,21 @@ export async function makeRequest(
         if (accessTokenRefreshed || !authConfig?.refreshAccessToken || !authConfig?.autoRefresh) {
           throw e;
         }
-        credentials = await refreshOauth2AccessToken({
-          key: String(payload.credentialKey),
-          connectorId,
-          credentials,
-          authConfig,
-          environment,
-          secretKey: doc.secretKey,
-        });
+        try {
+          credentials = await refreshOauth2AccessToken({
+            key: String(payload.credentialKey),
+            connectorId,
+            credentials,
+            authConfig,
+            environment,
+            secretKey: doc.secretKey,
+          });
+        } catch (e) {
+          if (e.status && e.status >= 400 && e.status <= 499 && !doc.invalid) {
+            await collection.updateOne({ key: payload.credentialKey }, { invalid: true }).catch(() => null);
+          }
+          throw e;
+        }
         accessTokenRefreshed = true;
         return await makeRequestInternal(getRequest());
       }
