@@ -455,7 +455,9 @@ export async function makeRequest(
             });
           } catch (e) {
             if (e.status && e.status >= 400 && e.status <= 499 && !doc.invalid) {
-              await collection.updateOne({ key: payload.credentialKey }, { invalid: true }).catch(() => null);
+              await collection
+                .updateOne({ key: String(payload.credentialKey) }, { $set: { invalid: true } })
+                .catch(() => null);
             }
             throw e;
           }
@@ -482,7 +484,9 @@ export async function makeRequest(
           });
         } catch (e) {
           if (e.status && e.status >= 400 && e.status <= 499 && !doc.invalid) {
-            await collection.updateOne({ key: payload.credentialKey }, { invalid: true }).catch(() => null);
+            await collection
+              .updateOne({ key: String(payload.credentialKey) }, { $set: { invalid: true } })
+              .catch(() => null);
           }
           throw e;
         }
