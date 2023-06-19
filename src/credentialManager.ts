@@ -299,10 +299,10 @@ async function refreshOauth2AccessToken({
   });
   const refreshResponse = await makeRequestInternal(refreshRequest);
   if ((refreshResponse.status || 200) >= 400) {
-    const e: Error & { status?: number } = new Error(
+    const e: Error & { response?: MakeRequestResponse } = new Error(
       `Failed to refresh token: ${refreshResponse.status} ${JSON.stringify(refreshResponse.data)}`
     );
-    e.status = refreshResponse.status;
+    e.response = refreshResponse;
     throw e;
   }
   credentials = { ...(credentials as object), ...(refreshResponse.data as object) };
@@ -434,6 +434,10 @@ export async function makeRequest(
   if (authType === "basic") {
     request.auth = [credentials.username, credentials.password];
   }
+  async function markCredentialInvalid() {
+    console.log(`Marking credential ${doc?.key} as invalid`);
+    await collection.updateOne({ key: doc?.key }, { $set: { invalid: true } }).catch(() => null);
+  }
   try {
     if (authType === "basic" || authType === "digest") {
       return await makeRequestBasicDigest(getRequest(), credentials.username, credentials.password);
@@ -454,10 +458,9 @@ export async function makeRequest(
               secretKey: doc.secretKey,
             });
           } catch (e) {
-            if (e.status && e.status >= 400 && e.status <= 499 && !doc.invalid) {
-              await collection
-                .updateOne({ key: String(payload.credentialKey) }, { $set: { invalid: true } })
-                .catch(() => null);
+            const status = e.response?.status;
+            if (status && status >= 400 && status <= 499 && !doc.invalid) {
+              await markCredentialInvalid();
             }
             throw e;
           }
@@ -483,10 +486,9 @@ export async function makeRequest(
             secretKey: doc.secretKey,
           });
         } catch (e) {
-          if (e.status && e.status >= 400 && e.status <= 499 && !doc.invalid) {
-            await collection
-              .updateOne({ key: String(payload.credentialKey) }, { $set: { invalid: true } })
-              .catch(() => null);
+          const status = e.response?.status;
+          if (status && status >= 400 && status <= 499 && !doc.invalid) {
+            await markCredentialInvalid();
           }
           throw e;
         }
