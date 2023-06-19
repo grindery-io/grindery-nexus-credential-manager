@@ -252,7 +252,7 @@ export async function getAuthCredentialsDisplayInfo(
   const userId = getUserId(user);
   const collection = await getCollection("authCredentials");
   const docs = await collection
-    .find({ connectorId, userId, environment, ...(includeInvalid ? { invalid: { $ne: true } } : {}) })
+    .find({ connectorId, userId, environment, ...(includeInvalid ? {} : { invalid: { $ne: true } }) })
     .toArray();
   const ret = docs.map(
     (doc) =>
