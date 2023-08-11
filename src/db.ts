@@ -28,12 +28,12 @@ export type DbSchema = {
 
 const INDEXES: { [name in keyof DbSchema]: [IndexSpecification, CreateIndexesOptions][] } = {
   connectorSecrets: [
-    [{ key: 1 }, { unique: true }],
+    [{ key: 1 }, {}],
     [{ connectorId: 1 }, {}],
     [{ connectorId: 1, environment: 1 }, {}],
   ],
   authCredentials: [
-    [{ key: 1 }, { unique: true }],
+    [{ key: 1 }, {}],
     [{ connectorId: 1 }, {}],
     [{ connectorId: 1, environment: 1 }, {}],
   ],
