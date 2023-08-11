@@ -8,7 +8,7 @@ import {
   MakeRequestResponse,
   Oauth2Config,
 } from "grindery-nexus-common-utils/dist/types";
-import { getCollection } from "./db";
+import { DbSchema, getCollection } from "./db";
 import { makeRequestBasicDigest, makeRequestInternal, verifyRequestSchema } from "./request";
 import { replaceTokens, InvalidParamsError, getConnectorSchema } from "grindery-nexus-common-utils";
 import { CredentialToken, TAccessToken } from "./jwt";
@@ -141,38 +141,76 @@ async function putAuthCredentialsInternal({
     }
   }
   const collection = await getCollection("authCredentials");
-  const key = uuidv4();
   const ts = Date.now();
   const tsString = new Date(ts).toISOString();
-  await collection.insertOne({
-    key,
+  const testRequest = connector.authentication?.test;
+  const hasTest = !!testRequest;
+  const doc: DbSchema["authCredentials"] = {
+    key: "ac-" + uuidv4(),
     connectorId,
     userId,
     environment,
     authCredentials: JSON.stringify(authCredentials),
     displayName: displayName || tsString,
     secretKey,
+    invalid: hasTest,
     updatedAt: ts,
     createdAt: ts,
-  });
-  const token = await CredentialToken.encrypt({ sub: userId, credentialKey: key }, "1000y");
-  if (!displayName && connector.authentication?.defaultDisplayName && connector.authentication.test) {
+  };
+  await collection.insertOne(doc);
+  const token = await CredentialToken.encrypt({ sub: userId, credentialKey: doc.key }, "1000y");
+  if (hasTest) {
     const testResponse = await makeRequest({
       connectorId,
       credentialToken: token,
-      request: connector.authentication.test,
+      request: testRequest,
       templateScope: "all",
     }).catch(() => ({ status: 500, data: {} }));
-    if ((testResponse.status || 200) === 200) {
+    if ((testResponse.status || 200) >= 400) {
+      collection.deleteOne({ key: doc.key }).catch(() => null);
+      throw new Error("Credential is not usable");
+    }
+    if (connector.authentication?.defaultDisplayName) {
       displayName = replaceTokens(connector.authentication.defaultDisplayName, {
         data: testResponse.data,
         auth: authCredentials,
         timestamp: tsString,
       });
-      await collection.updateOne({ key }, { $set: { displayName } });
     }
+    if (connector.authentication?.credentialId) {
+      const credentialId = replaceTokens(connector.authentication.credentialId, {
+        data: testResponse.data,
+        auth: authCredentials,
+      });
+      if (credentialId) {
+        const existingCredential = await collection.findOne({
+          connectorId,
+          environment,
+          userId,
+          credentialId,
+        });
+        if (existingCredential) {
+          await collection.deleteOne({ key: doc.key });
+          Object.assign(doc, { key: existingCredential.key, createdAt: existingCredential.createdAt });
+        }
+        doc.credentialId = credentialId;
+      }
+    }
+    await collection.updateOne(
+      { key: doc.key },
+      {
+        $set: {
+          displayName,
+          invalid: false,
+          secretKey: doc.secretKey,
+          updatedAt: Date.now(),
+          authCredentials: doc.authCredentials,
+          credentialId: doc.credentialId,
+        },
+      }
+    );
   }
-  return { key, createdAt: ts, token, displayName: displayName || tsString };
+  return { key: doc.key, createdAt: ts, token, displayName: displayName || tsString };
 }
 export async function putAuthCredentials(
   {
