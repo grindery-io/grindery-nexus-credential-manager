@@ -52,6 +52,9 @@ const authMiddleware = async (
       return createJSONRPCErrorResponse(request.id || "", JSONRPCErrorCode.InvalidParams, "Invalid access token");
     }
   }
+  if (!serverParams) {
+    return createJSONRPCErrorResponse(request.id || "", JSONRPCErrorCode.InternalError, "Invalid state");
+  }
   return await next(request, serverParams);
 };
 
